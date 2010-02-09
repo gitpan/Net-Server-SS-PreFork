@@ -3,11 +3,16 @@ package Test::TCP;
 use strict;
 use warnings;
 use 5.00800;
-our $VERSION = '0.06';
+our $VERSION = '0.15';
 use base qw/Exporter/;
 use IO::Socket::INET;
-use Params::Validate ':all';
 use Test::SharedFork;
+use Test::More ();
+use Config;
+use POSIX;
+
+# process does not die when received SIGTERM, on win32.
+my $TERMSIG = $^O eq 'MSWin32' ? 'KILL' : 'TERM';
 
 our @EXPORT = qw/ empty_port test_tcp wait_port /;
 
@@ -21,7 +26,7 @@ sub empty_port {
             LocalAddr => '127.0.0.1',
             LocalPort => $port,
             Proto     => 'tcp',
-            ReuseAddr => 1,
+            (($^O eq 'MSWin32') ? () : (ReuseAddr => 1)),
         );
         return $port if $sock;
     }
@@ -39,14 +44,45 @@ sub test_tcp {
         # parent.
         wait_port($port);
 
-        $args{client}->($port, $pid);
+        my $sig;
+        my $err;
+        {
+            local $SIG{INT}  = sub { $sig = "INT"; die "SIGINT received\n" };
+            local $SIG{PIPE} = sub { $sig = "PIPE"; die "SIGPIPE received\n" };
+            eval {
+                $args{client}->($port, $pid);
+            };
+            $err = $@;
 
-        kill TERM => $pid;
-        waitpid( $pid, 0 );
+            # cleanup
+            kill $TERMSIG => $pid;
+            while (1) {
+                my $kid = waitpid( $pid, 0 );
+                if ($^O ne 'MSWin32') { # i'm not in hell
+                    if (WIFSIGNALED($?)) {
+                        my $signame = (split(' ', $Config{sig_name}))[WTERMSIG($?)];
+                        if ($signame =~ /^(ABRT|PIPE)$/) {
+                            Test::More::diag("your server received SIG$signame");
+                        }
+                    }
+                }
+                if ($kid == 0 || $kid == -1) {
+                    last;
+                }
+            }
+        }
+
+        if ($sig) {
+            kill $sig, $$; # rethrow signal after cleanup
+        }
+        if ($err) {
+            die $err; # rethrow exception after cleanup.
+        }
     }
     elsif ( $pid == 0 ) {
         # child
         $args{server}->($port);
+        exit;
     }
     else {
         die "fork failed: $!";
@@ -86,4 +122,4 @@ __END__
 
 =encoding utf8
 
-#line 170
+#line 240
