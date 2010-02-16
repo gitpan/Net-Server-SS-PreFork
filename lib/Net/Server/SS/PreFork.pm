@@ -9,7 +9,7 @@ use Server::Starter qw(server_ports);
 
 use base qw(Net::Server::PreFork);
 
-our $VERSION = 0.03;
+our $VERSION = 0.04;
 
 sub pre_bind {
     my $self = shift;
@@ -30,6 +30,7 @@ sub pre_bind {
             or $self->fatal("failed to bind listening socket:$ports{$port}:$!");
         push @{$prop->{sock}}, $sock;
     }
+    $prop->{multi_port} = 1 if @{$prop->{sock}} > 1;
 }
 
 sub bind {

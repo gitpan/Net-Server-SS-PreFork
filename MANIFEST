@@ -21,3 +21,4 @@ README
 t/00-base.t
 t/01-httpd.pl
 t/01-httpd.t
+t/02-multiport.t
